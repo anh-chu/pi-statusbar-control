@@ -1,6 +1,6 @@
 {
   "name": "pi-statusbar-control",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Show or hide status-bar elements injected by any pi extension via ctx.ui.setStatus, with a toggle list that persists across restarts.",
   "type": "module",
   "keywords": [
