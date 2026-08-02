@@ -1,0 +1,35 @@
+{
+  "name": "pi-statusbar-control",
+  "version": "0.1.0",
+  "description": "Show or hide status-bar elements injected by any pi extension via ctx.ui.setStatus, with a toggle list that persists across restarts.",
+  "type": "module",
+  "keywords": [
+    "pi-package",
+    "pi-extension",
+    "status-bar",
+    "footer",
+    "tui"
+  ],
+  "license": "MIT",
+  "author": "anh-chu",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/anh-chu/pi-statusbar-control.git"
+  },
+  "homepage": "https://github.com/anh-chu/pi-statusbar-control",
+  "files": [
+    "index.ts",
+    "README.md",
+    "LICENSE"
+  ],
+  "pi": {
+    "extensions": [
+      "./index.ts"
+    ]
+  },
+  "peerDependencies": {
+    "@earendil-works/pi-coding-agent": "*",
+    "@earendil-works/pi-ai": "*",
+    "@earendil-works/pi-tui": "*"
+  }
+}
