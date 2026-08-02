@@ -32,6 +32,9 @@ Or drop `index.ts` into `~/.pi/agent/extensions/` / `.pi/extensions/`.
 | `/statusbar off` | Restore pi's untouched default footer |
 | `/statusbar on` | Re-enable the filtered footer (default) |
 
+All subcommands and `move` arguments (extension keys, then directions) autocomplete as you type —
+press Tab / start typing after `/statusbar ` to see suggestions with descriptions.
+
 ### Toggleable elements
 
 **Built-in** (always listed, fixed order, independent of any extension):

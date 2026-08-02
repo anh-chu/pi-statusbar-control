@@ -324,6 +324,46 @@ export default function statusbarControl(pi: ExtensionAPI) {
 
 	pi.registerCommand("statusbar", {
 		description: "Show/hide/reorder status-bar elements (built-in and extension-injected)",
+		getArgumentCompletions: (argumentText: string) => {
+			const endsWithSpace = /\s$/.test(argumentText);
+			const tokens = argumentText.split(/\s+/).filter(Boolean);
+			const completedTokens = endsWithSpace ? tokens : tokens.slice(0, -1);
+			const partial = (endsWithSpace ? "" : tokens[tokens.length - 1] ?? "").toLowerCase();
+
+			if (completedTokens.length === 0) {
+				const subs = [
+					{ value: "on", label: "on", description: "Re-enable the filtered footer (default)" },
+					{ value: "off", label: "off", description: "Restore pi's untouched default footer" },
+					{ value: "list", label: "list", description: "Print known elements and their visibility" },
+					{ value: "order", label: "order", description: "Interactively reorder extension-injected statuses" },
+					{ value: "move", label: "move <key> <up|down|top|bottom>", description: "Reorder one key non-interactively" },
+				];
+				const filtered = subs.filter((s) => s.value.startsWith(partial));
+				return filtered.length > 0 ? filtered : null;
+			}
+
+			if (completedTokens[0].toLowerCase() === "move") {
+				if (completedTokens.length === 1) {
+					const keys = settings.order.filter((k) => k.toLowerCase().startsWith(partial));
+					if (keys.length === 0) return null;
+					return keys.map((k) => ({ value: `move ${k}`, label: k, description: "extension status key" }));
+				}
+				if (completedTokens.length === 2) {
+					const key = completedTokens[1];
+					const dirs = [
+						{ value: "up", description: "move one position up" },
+						{ value: "down", description: "move one position down" },
+						{ value: "top", description: "move to the top" },
+						{ value: "bottom", description: "move to the bottom" },
+					];
+					const filtered = dirs.filter((d) => d.value.startsWith(partial));
+					if (filtered.length === 0) return null;
+					return filtered.map((d) => ({ value: `move ${key} ${d.value}`, label: d.value, description: d.description }));
+				}
+			}
+
+			return null;
+		},
 		handler: async (args, ctx) => {
 			const sub = args.trim().toLowerCase();
 
