@@ -51,8 +51,15 @@ press Tab / start typing after `/statusbar ` to see suggestions with description
 (↑/↓ to move the cursor, shift+↑/shift+↓ or `K`/`J` to move the selected item, enter/esc to close)
 or `/statusbar move <key> <direction>`.
 
-Visibility, known extension keys, and their order persist to `~/.pi/agent/settings.json` under
-`statusbarControl`.
+### Own-line / wrapping
+
+A single lengthy status can crowd out everything else sharing its line. In `/statusbar`, cycle an
+extension key's value to **own line** to always render it on its own footer line, independent of
+the others. Any remaining inline group that still doesn't fit the terminal width wraps onto
+additional lines automatically instead of getting truncated.
+
+Visibility, known extension keys, their order, and own-line placement persist to
+`~/.pi/agent/settings.json` under `statusbarControl`.
 
 ## License
 

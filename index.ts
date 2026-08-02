@@ -6,6 +6,11 @@
  * model/thinking) as well as anything an extension injects via
  * ctx.ui.setStatus(key, text).
  *
+ * Extension-injected statuses can also be forced onto their own footer line
+ * (toggle "own line" in /statusbar) so a lengthy status doesn't crowd out
+ * others sharing the same line. Inline groups that don't fit the terminal
+ * width automatically wrap onto additional lines instead of truncating.
+ *
  * Commands:
  *   /statusbar        - open toggle list for all known elements
  *   /statusbar list   - print known elements and their current visibility
@@ -14,7 +19,8 @@
  *   /statusbar order  - interactively reorder extension-injected statuses
  *   /statusbar move <key> <up|down|top|bottom> - reorder one key non-interactively
  *
- * Visibility and order choices persist to ~/.pi/agent/settings.json under "statusbarControl".
+ * Visibility, order, and line-placement choices persist to ~/.pi/agent/settings.json
+ * under "statusbarControl".
  */
 
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
@@ -32,6 +38,8 @@ interface StatusbarControlSettings {
 	knownKeys: string[];
 	// display order for extension-status keys (user-customizable via /statusbar order)
 	order: string[];
+	// extension-status keys forced onto their own footer line (vs. packed inline with others)
+	newLine: string[];
 }
 
 // Built-in footer segments, matching pi's default FooterComponent output.
@@ -54,7 +62,7 @@ function getSettingsPath(): string {
 }
 
 function loadSettings(): StatusbarControlSettings {
-	const defaults: StatusbarControlSettings = { enabled: true, hidden: [], knownKeys: [], order: [] };
+	const defaults: StatusbarControlSettings = { enabled: true, hidden: [], knownKeys: [], order: [], newLine: [] };
 	const settingsPath = getSettingsPath();
 	if (!existsSync(settingsPath)) return defaults;
 	try {
@@ -69,6 +77,7 @@ function loadSettings(): StatusbarControlSettings {
 				? section.knownKeys.filter((v): v is string => typeof v === "string")
 				: [],
 			order: Array.isArray(section.order) ? section.order.filter((v): v is string => typeof v === "string") : [],
+			newLine: Array.isArray(section.newLine) ? section.newLine.filter((v): v is string => typeof v === "string") : [],
 		};
 	} catch {
 		return defaults;
@@ -298,6 +307,7 @@ export default function statusbarControl(pi: ExtensionAPI) {
 					const statuses = footerData.getExtensionStatuses();
 					rememberKeys(statuses.keys());
 					const orderIndex = new Map(settings.order.map((k, i) => [k, i]));
+					const newLineSet = new Set(settings.newLine);
 					const visibleExt = Array.from(statuses.entries())
 						.filter(([key, text]) => !hidden.has(key) && text)
 						.sort(([a], [b]) => {
@@ -306,10 +316,42 @@ export default function statusbarControl(pi: ExtensionAPI) {
 							if (ai !== bi) return ai - bi;
 							return a.localeCompare(b);
 						})
-						.map(([, text]) => sanitizeStatusText(text));
-					if (visibleExt.length > 0) {
-						lines.push(truncateToWidth(visibleExt.join(" "), width, theme.fg("dim", "...")));
+						.map(([key, text]) => ({ key, text: sanitizeStatusText(text) }));
+
+					// Wrap an inline group across multiple lines if it doesn't fit width,
+					// instead of truncating everything into one line.
+					function wrapInline(parts: string[]): string[] {
+						const wrapped: string[] = [];
+						let current = "";
+						for (const part of parts) {
+							const candidate = current ? `${current} ${part}` : part;
+							if (current && visibleWidth(candidate) > width) {
+								wrapped.push(current);
+								current = part;
+							} else {
+								current = candidate;
+							}
+						}
+						if (current) wrapped.push(current);
+						return wrapped.map((line) => truncateToWidth(line, width, theme.fg("dim", "...")));
 					}
+
+					let pendingInline: string[] = [];
+					function flushInline() {
+						if (pendingInline.length > 0) {
+							lines.push(...wrapInline(pendingInline));
+							pendingInline = [];
+						}
+					}
+					for (const { key, text } of visibleExt) {
+						if (newLineSet.has(key)) {
+							flushInline();
+							lines.push(truncateToWidth(text, width, theme.fg("dim", "...")));
+						} else {
+							pendingInline.push(text);
+						}
+					}
+					flushInline();
 
 					return lines.length > 0 ? lines : [""];
 				},
@@ -387,9 +429,11 @@ export default function statusbarControl(pi: ExtensionAPI) {
 
 			if (sub === "list") {
 				const hidden = new Set(settings.hidden);
+				const newLineSet = new Set(settings.newLine);
+				const extLine = (k: string) => (hidden.has(k) ? "hidden  " : newLineSet.has(k) ? "own-line" : "shown   ");
 				const lines = [
-					...BUILTIN_SEGMENTS.map((s) => `${hidden.has(s.id) ? "hidden" : "shown "}  ${s.label}`),
-					...settings.knownKeys.map((k) => `${hidden.has(k) ? "hidden" : "shown "}  ${k}`),
+					...BUILTIN_SEGMENTS.map((s) => `${hidden.has(s.id) ? "hidden  " : "shown   "}  ${s.label}`),
+					...settings.knownKeys.map((k) => `${extLine(k)}  ${k}`),
 				];
 				ctx.ui.notify(lines.join("\n"), "info");
 				return;
@@ -486,6 +530,7 @@ export default function statusbarControl(pi: ExtensionAPI) {
 
 			await ctx.ui.custom((tui, theme, _kb, done) => {
 				const hidden = new Set(settings.hidden);
+				const newLineSet = new Set(settings.newLine);
 				const items: SettingItem[] = [
 					...BUILTIN_SEGMENTS.map((s) => ({
 						id: s.id,
@@ -496,8 +541,8 @@ export default function statusbarControl(pi: ExtensionAPI) {
 					...settings.knownKeys.map((key) => ({
 						id: key,
 						label: key,
-						currentValue: hidden.has(key) ? "hidden" : "shown",
-						values: ["shown", "hidden"],
+						currentValue: hidden.has(key) ? "hidden" : newLineSet.has(key) ? "own line" : "shown",
+						values: ["shown", "own line", "hidden"],
 					})),
 				];
 
@@ -517,10 +562,20 @@ export default function statusbarControl(pi: ExtensionAPI) {
 					getSettingsListTheme(),
 					(id, newValue) => {
 						const hiddenSet = new Set(settings.hidden);
-						if (newValue === "hidden") hiddenSet.add(id);
-						else hiddenSet.delete(id);
-						settings = { ...settings, hidden: Array.from(hiddenSet) };
+						const newLineSetNext = new Set(settings.newLine);
+						if (newValue === "hidden") {
+							hiddenSet.add(id);
+							newLineSetNext.delete(id);
+						} else if (newValue === "own line") {
+							hiddenSet.delete(id);
+							newLineSetNext.add(id);
+						} else {
+							hiddenSet.delete(id);
+							newLineSetNext.delete(id);
+						}
+						settings = { ...settings, hidden: Array.from(hiddenSet), newLine: Array.from(newLineSetNext) };
 						saveSettings(settings);
+						applyFooter(ctx);
 						tui.requestRender();
 					},
 					() => {
