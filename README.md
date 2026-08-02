@@ -3,13 +3,15 @@
 [![npm](https://img.shields.io/npm/v/pi-statusbar-control)](https://www.npmjs.com/package/pi-statusbar-control)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
-Show or hide **every** element pi's footer can display — its own built-in segments (path, git
-branch, token stats, cost, context usage, model/thinking) as well as anything an extension injects
-via `ctx.ui.setStatus(key, text)` (plan mode, powerline stash indicators, custom status demos, etc.).
+Show, hide, and reorder **every** element pi's footer can display — its own built-in segments
+(path, git branch, token stats, cost, context usage, model/thinking) as well as anything an
+extension injects via `ctx.ui.setStatus(key, text)` (plan mode, powerline stash indicators, custom
+status demos, etc.).
 
-Pi's default footer always renders all of these with no way to filter. This extension takes over
-the footer, reproduces the built-in segments exactly, discovers every extension key it observes,
-and gives you one toggle list to show or hide each element — persisted across restarts.
+Pi's default footer always renders all of these with no way to filter or reorder. This extension
+takes over the footer, reproduces the built-in segments exactly, discovers every extension key it
+observes, and gives you one toggle list to show/hide each element plus a reorder UI for
+extension-injected ones — all persisted across restarts.
 
 ## Install
 
@@ -25,12 +27,14 @@ Or drop `index.ts` into `~/.pi/agent/extensions/` / `.pi/extensions/`.
 |---|---|
 | `/statusbar` | Open interactive toggle list (shown/hidden per element) |
 | `/statusbar list` | Print all known elements and current visibility |
+| `/statusbar order` | Interactively reorder extension-injected statuses |
+| `/statusbar move <key> <up\|down\|top\|bottom>` | Reorder one key non-interactively |
 | `/statusbar off` | Restore pi's untouched default footer |
 | `/statusbar on` | Re-enable the filtered footer (default) |
 
 ### Toggleable elements
 
-**Built-in** (always listed, independent of any extension):
+**Built-in** (always listed, fixed order, independent of any extension):
 
 - path — cwd (abbreviated to `~`), git branch, session name
 - tokens — ↑input ↓output cache read/write, cache-hit %
@@ -40,9 +44,11 @@ Or drop `index.ts` into `~/.pi/agent/extensions/` / `.pi/extensions/`.
 
 **Extension-injected** — discovered automatically the first time the source extension calls
 `ctx.ui.setStatus(key, ...)`. If a key isn't in the list yet, trigger that extension once and run
-`/statusbar` again.
+`/statusbar` again. Their relative display order is fully customizable via `/statusbar order`
+(↑/↓ to move the cursor, shift+↑/shift+↓ or `K`/`J` to move the selected item, enter/esc to close)
+or `/statusbar move <key> <direction>`.
 
-Visibility choices and known extension keys persist to `~/.pi/agent/settings.json` under
+Visibility, known extension keys, and their order persist to `~/.pi/agent/settings.json` under
 `statusbarControl`.
 
 ## License

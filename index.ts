@@ -11,8 +11,10 @@
  *   /statusbar list   - print known elements and their current visibility
  *   /statusbar on     - re-enable filtered footer (default)
  *   /statusbar off    - restore pi's default footer untouched
+ *   /statusbar order  - interactively reorder extension-injected statuses
+ *   /statusbar move <key> <up|down|top|bottom> - reorder one key non-interactively
  *
- * Visibility choices persist to ~/.pi/agent/settings.json under "statusbarControl".
+ * Visibility and order choices persist to ~/.pi/agent/settings.json under "statusbarControl".
  */
 
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
@@ -28,6 +30,8 @@ interface StatusbarControlSettings {
 	hidden: string[];
 	// every extension-status key ever seen, so the toggle list stays stable across sessions
 	knownKeys: string[];
+	// display order for extension-status keys (user-customizable via /statusbar order)
+	order: string[];
 }
 
 // Built-in footer segments, matching pi's default FooterComponent output.
@@ -50,7 +54,7 @@ function getSettingsPath(): string {
 }
 
 function loadSettings(): StatusbarControlSettings {
-	const defaults: StatusbarControlSettings = { enabled: true, hidden: [], knownKeys: [] };
+	const defaults: StatusbarControlSettings = { enabled: true, hidden: [], knownKeys: [], order: [] };
 	const settingsPath = getSettingsPath();
 	if (!existsSync(settingsPath)) return defaults;
 	try {
@@ -64,6 +68,7 @@ function loadSettings(): StatusbarControlSettings {
 			knownKeys: Array.isArray(section.knownKeys)
 				? section.knownKeys.filter((v): v is string => typeof v === "string")
 				: [],
+			order: Array.isArray(section.order) ? section.order.filter((v): v is string => typeof v === "string") : [],
 		};
 	} catch {
 		return defaults;
@@ -117,20 +122,40 @@ function sanitizeStatusText(text: string): string {
 		.trim();
 }
 
+function moveInArray(arr: string[], id: string, dir: "up" | "down" | "top" | "bottom"): string[] {
+	const idx = arr.indexOf(id);
+	if (idx === -1) return arr;
+	const next = arr.slice();
+	next.splice(idx, 1);
+	let target: number;
+	if (dir === "top") target = 0;
+	else if (dir === "bottom") target = next.length;
+	else if (dir === "up") target = Math.max(0, idx - 1);
+	else target = Math.min(next.length, idx + 1);
+	next.splice(target, 0, id);
+	return next;
+}
+
 export default function statusbarControl(pi: ExtensionAPI) {
 	let settings = loadSettings();
 
 	function rememberKeys(keys: Iterable<string>) {
 		let changed = false;
+		let changedOrder = false;
 		const known = new Set(settings.knownKeys);
+		const order = settings.order.slice();
 		for (const k of keys) {
 			if (!known.has(k)) {
 				known.add(k);
 				changed = true;
 			}
+			if (!order.includes(k)) {
+				order.push(k);
+				changedOrder = true;
+			}
 		}
-		if (changed) {
-			settings = { ...settings, knownKeys: Array.from(known) };
+		if (changed || changedOrder) {
+			settings = { ...settings, knownKeys: Array.from(known), order };
 			saveSettings(settings);
 		}
 	}
@@ -272,9 +297,15 @@ export default function statusbarControl(pi: ExtensionAPI) {
 					// --- extension-injected statuses (ctx.ui.setStatus) ---
 					const statuses = footerData.getExtensionStatuses();
 					rememberKeys(statuses.keys());
+					const orderIndex = new Map(settings.order.map((k, i) => [k, i]));
 					const visibleExt = Array.from(statuses.entries())
 						.filter(([key, text]) => !hidden.has(key) && text)
-						.sort(([a], [b]) => a.localeCompare(b))
+						.sort(([a], [b]) => {
+							const ai = orderIndex.has(a) ? (orderIndex.get(a) as number) : Number.MAX_SAFE_INTEGER;
+							const bi = orderIndex.has(b) ? (orderIndex.get(b) as number) : Number.MAX_SAFE_INTEGER;
+							if (ai !== bi) return ai - bi;
+							return a.localeCompare(b);
+						})
 						.map(([, text]) => sanitizeStatusText(text));
 					if (visibleExt.length > 0) {
 						lines.push(truncateToWidth(visibleExt.join(" "), width, theme.fg("dim", "...")));
@@ -292,7 +323,7 @@ export default function statusbarControl(pi: ExtensionAPI) {
 	});
 
 	pi.registerCommand("statusbar", {
-		description: "Show/hide status-bar elements (built-in and extension-injected)",
+		description: "Show/hide/reorder status-bar elements (built-in and extension-injected)",
 		handler: async (args, ctx) => {
 			const sub = args.trim().toLowerCase();
 
@@ -321,6 +352,90 @@ export default function statusbarControl(pi: ExtensionAPI) {
 					...settings.knownKeys.map((k) => `${hidden.has(k) ? "hidden" : "shown "}  ${k}`),
 				];
 				ctx.ui.notify(lines.join("\n"), "info");
+				return;
+			}
+
+			if (sub.startsWith("move ")) {
+				const parts = args.trim().split(/\s+/);
+				const key = parts[1];
+				const dir = (parts[2] || "").toLowerCase();
+				if (!key || !settings.order.includes(key)) {
+					ctx.ui.notify(`Unknown extension-status key: ${key ?? "(none given)"}`, "error");
+					return;
+				}
+				if (dir !== "up" && dir !== "down" && dir !== "top" && dir !== "bottom") {
+					ctx.ui.notify("Usage: /statusbar move <key> <up|down|top|bottom>", "error");
+					return;
+				}
+				settings = { ...settings, order: moveInArray(settings.order, key, dir) };
+				saveSettings(settings);
+				applyFooter(ctx);
+				ctx.ui.notify(`Moved ${key} ${dir}`, "info");
+				return;
+			}
+
+			if (sub === "order") {
+				if (ctx.mode !== "tui") {
+					ctx.ui.notify("/statusbar order requires TUI mode", "error");
+					return;
+				}
+				if (settings.order.length === 0) {
+					ctx.ui.notify("No extension-injected status keys observed yet.", "info");
+					return;
+				}
+
+				await ctx.ui.custom((tui, theme, _kb, done) => {
+					let order = settings.order.slice();
+					let cursor = 0;
+
+					function persist() {
+						settings = { ...settings, order };
+						saveSettings(settings);
+						applyFooter(ctx);
+					}
+
+					return {
+						invalidate() {},
+						render(width: number): string[] {
+							const lines: string[] = [
+								theme.fg("accent", theme.bold("Reorder Extension Statuses")),
+								theme.fg("dim", "↑/↓ move cursor · shift+↑/shift+↓ (or K/J) move item · enter/esc close"),
+								"",
+							];
+							order.forEach((key, i) => {
+								const marker = i === cursor ? theme.fg("accent", "› ") : "  ";
+								const label = i === cursor ? theme.bold(key) : key;
+								lines.push(truncateToWidth(marker + label, width));
+							});
+							return lines;
+						},
+						handleInput(data: string) {
+							if (data === "\x1b[A" || data === "k") {
+								cursor = Math.max(0, cursor - 1);
+							} else if (data === "\x1b[B" || data === "j") {
+								cursor = Math.min(order.length - 1, cursor + 1);
+							} else if (data === "\x1b[1;2A" || data === "K") {
+								if (cursor > 0) {
+									const key = order[cursor];
+									order = moveInArray(order, key, "up");
+									cursor -= 1;
+									persist();
+								}
+							} else if (data === "\x1b[1;2B" || data === "J") {
+								if (cursor < order.length - 1) {
+									const key = order[cursor];
+									order = moveInArray(order, key, "down");
+									cursor += 1;
+									persist();
+								}
+							} else if (data === "\r" || data === "\n" || data === "\x1b") {
+								done(undefined);
+								return;
+							}
+							tui.requestRender();
+						},
+					};
+				});
 				return;
 			}
 
